@@ -1,0 +1,56 @@
+version: "3.9"
+
+services:
+  wordpress:
+    image: wordpress:5.7.1
+    ports:
+      - 8004:80
+    deploy:
+      replicas: 2
+      placement:
+        max_replicas_per_node: 1
+        constraints:
+          - "node.labels.db==true"
+      restart_policy:
+        condition: any
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=proxy"
+
+        - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+        - "traefik.http.services.wordpress.loadbalancer.server.port=80" # it seems you always need to give traefik a port so it 'notices' the service
+        - "traefik.http.services.wordpress.loadbalancer.sticky.cookie=true"
+
+        - "traefik.http.middlewares.redirectregex.redirectregex.regex=^https?://www.example.blog(?::[0-9]+)?/(.*)"
+        - "traefik.http.middlewares.redirectregex.redirectregex.replacement=https://example.blog/$${1}"
+        - "traefik.http.middlewares.redirectregex.redirectregex.permanent=true"
+
+        - "traefik.http.routers.wordpress.rule=Host(`example.blog`) || Host(`www.example.blog`)"
+        - "traefik.http.routers.wordpress.entrypoints=web"
+        - "traefik.http.routers.wordpress.middlewares=dp-redirectregex"
+
+        - "traefik.http.routers.wordpress-secured.rule=Host(`example.blog`) || Host(`www.example.blog`)"
+        - "traefik.http.routers.wordpress-secured.entrypoints=web-secured"
+        - "traefik.http.routers.wordpress-secured.tls=true"
+        - "traefik.http.routers.wordpress-secured.middlewares=redirectregex"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file: .env
+    environment:
+      WORDPRESS_DB_HOST: "${WORDPRESS_DB_HOST}"
+      WORDPRESS_DB_USER: "${WORDPRESS_DB_USER_WP}"
+      WORDPRESS_DB_PASSWORD: "${WORDPRESS_DB_PASSWORD_WP}"
+      WORDPRESS_DB_NAME: "${WORDPRESS_DB_NAME_WP}"
+    volumes:
+      - /var/www/example_blog/wp-content:/var/www/html/wp-content
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    external: true

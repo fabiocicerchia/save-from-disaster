@@ -1,0 +1,65 @@
+---
+- name: "Provision Storage"
+  hosts: all
+  become: true
+
+  vars_files:
+    - ../vars/storage.yml
+
+  tasks:
+
+  - name: Add user syncer
+    ansible.builtin.user:
+      name: "syncer"
+      shell: /bin/sh
+      home: /var/www
+      groups: www-data
+
+  - name: Fetch manager key on bootstrap
+    slurp:
+      src: /home/manager/.ssh/id_rsa.pub
+    register: slurped_boostrap_key_b64
+    when: hostvars[inventory_hostname]['ansible_default_ipv4']['address'] == bootstrap_node_ip
+
+  - name: Fetch manager key on secondary
+    slurp:
+      src: /root/.ssh/id_rsa.pub
+    register: slurped_secondary_key_b64
+    when: hostvars[inventory_hostname]['ansible_default_ipv4']['address'] == secondary_node_ip
+
+  - name: Ensure the fetched key is set for syncer 1
+    authorized_key:
+      user: syncer
+      state: present
+      key: "{{ slurped_secondary_key_b64.content | b64decode }}"
+      key_options: 'command="rsync --server -vulogDtpre.iLsfxC . /var/www"'
+    when: hostvars[inventory_hostname]['ansible_default_ipv4']['address'] == bootstrap_node_ip
+
+  - name: Ensure the fetched key is set for syncer 2
+    authorized_key:
+      user: syncer
+      state: present
+      key: "{{ slurped_bootstrap_key_b64.content | b64decode }}"
+      key_options: 'command="rsync --server -vulogDtpre.iLsfxC . /var/www"'
+    when: hostvars[inventory_hostname]['ansible_default_ipv4']['address'] == secondary_node_ip
+
+  - name: Add backup script to crontab 1
+    blockinfile:
+      path: /var/spool/cron/crontabs/root
+      block: |
+        */5 * * * * /usr/bin/timeout 120 /root/sync-storage.sh {{ secondary_node_ip }}
+    when: hostvars[inventory_hostname]['ansible_default_ipv4']['address'] == bootstrap_node_ip
+
+  - name: Add backup script to crontab 2
+    blockinfile:
+      path: /var/spool/cron/crontabs/root
+      block: |
+        */5 * * * * /usr/bin/timeout 120 /root/sync-storage.sh {{ bootstrap_node_ip }}
+    when: hostvars[inventory_hostname]['ansible_default_ipv4']['address'] == secondary_node_ip
+
+  - name: Add backup script to crontab 3
+    blockinfile:
+      path: /var/spool/cron/crontabs/root
+      block: |
+        0 2 * * * /usr/bin/timeout 120 /root/storage-backup.sh
+    when: hostvars[inventory_hostname]['ansible_default_ipv4']['address'] == secondary_node_ip

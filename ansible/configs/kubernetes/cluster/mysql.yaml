@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  labels:
+    service: mysql
+  name: mysql
+spec:
+  selector:
+    matchLabels:
+      service: mysql
+  template: 
+    metadata:
+      labels:
+        service: mysql
+    spec:
+      nodeSelector:
+        kubernetes.io/role: node
+      containers:
+      - name: alpine
+        image: alpine
+        command: ["sleep", "1d"]
+      hostNetwork: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    service: mysql
+  name: mysql
+spec:
+  selector:
+    service: mysql
+  ports:
+    - name: "30306"
+      nodePort: 30306
+      port: 30306
+      targetPort: 3306
+  type: NodePort

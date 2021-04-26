@@ -1,0 +1,40 @@
+# generic
+# #######
+ansible_python_interpreter: '/usr/bin/python3.8'
+ansible_user: root
+
+# oefenweb.apt
+# ############
+apt_upgrade: true
+apt_install:
+  - "apt-transport-https"
+  - "awscli"
+  - "curl"
+  - "htop"
+  - "iptables-persistent"
+  - "logrotate"
+  - "python3-pip"
+  - "syslog-ng"
+  - "vim"
+  - "wget"
+
+# ahuffman.resolv
+# ###############
+resolv_nameservers:
+  - "8.8.8.8"
+  - "8.8.4.4"
+resolv_options:
+  - "timeout:1"
+  - "attempts:1"
+  - "rotate"
+
+# geerlingguy.ntp
+# ###############
+ntp_timezone: "UTC"
+
+# dev-sec.os-hardening
+# ####################
+os_auth_pw_max_age: 99999
+sysctl_overwrite:
+  # Enable IPv4 traffic forwarding.
+  net.ipv4.ip_forward: 1

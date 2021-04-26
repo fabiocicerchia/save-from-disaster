@@ -1,0 +1,31 @@
+version: "3.9"
+
+services:
+  loadbalancer:
+    image: traefik:2.4.8
+    ports:
+      - 80:80
+      - 443:443
+      - 9090:8080
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /etc/letsencrypt:/letsencrypt:ro
+      - ./traefik.toml:/traefik.toml
+      - ./traefik-dyn.toml:/conf/traefik-dyn.toml
+    deploy:
+      restart_policy:
+        condition: any
+      mode: replicated
+      replicas: 1
+      placement:
+        max_replicas_per_node: 1
+      update_config:
+        delay: 2s
+      placement:
+         constraints: [node.role == manager]
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    external: true

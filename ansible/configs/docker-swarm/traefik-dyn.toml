@@ -1,0 +1,10 @@
+[tls.options]
+  [tls.options.default]
+    sniStrict = true
+
+[[tls.certificates]]
+  certFile = "/letsencrypt/live/example.com/fullchain.pem"
+  keyFile = "/letsencrypt/live/example.com/privkey.pem"
+[[tls.certificates]]
+  certFile = "/letsencrypt/live/www.example.com/fullchain.pem"
+  keyFile = "/letsencrypt/live/www.example.com/privkey.pem"

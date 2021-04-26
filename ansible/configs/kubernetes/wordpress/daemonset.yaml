@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  labels:
+    network/proxy: "true"
+    service: wordpress-wp
+  namespace: app-wordpress
+  name: wordpress-wp
+spec:
+  selector:
+    matchLabels:
+      service: wordpress-wp
+  template: 
+    metadata:
+      labels:
+        service: wordpress-wp
+    spec:
+      nodeSelector:
+        kubernetes.io/role: node
+      containers:
+        - image: wordpress:5.7.0
+          imagePullPolicy: IfNotPresent
+          env:
+          - name: WORDPRESS_DB_HOST
+            valueFrom:
+              configMapKeyRef:
+                name: env-wordpress
+                key: WORDPRESS_DB_HOST
+          - name: WORDPRESS_DB_USER
+            valueFrom:
+              configMapKeyRef:
+                name: env-wordpress
+                key: WORDPRESS_DB_USER
+          - name: WORDPRESS_DB_PASSWORD
+            valueFrom:
+              configMapKeyRef:
+                name: env-wordpress
+                key: WORDPRESS_DB_PASSWORD
+          - name: WORDPRESS_DB_NAME
+            valueFrom:
+              configMapKeyRef:
+                name: env-wordpress
+                key: WORDPRESS_DB_NAME
+          livenessProbe:
+            exec:
+              command:
+                - curl
+                - -f
+                - http://localhost:80
+            failureThreshold: 3
+            periodSeconds: 30
+            timeoutSeconds: 5
+          name: wordpress-wp
+          ports:
+            - containerPort: 80
+          resources: {}
+          volumeMounts:
+            - mountPath: /var/www/example_blog/wp-content
+              name: wp-content
+      volumes:
+        - name: wp-content
+          persistentVolumeClaim:
+            claimName: pvc-wordpress-wp
+        - name: nginx-vhost-wordpress
+          configMap:
+            name: nginx-vhost-wordpress
+            items:
+              - key: wordpress.conf
+                path: wordpress.conf
+      securityContext:
+        runAsUser: 0
+        fsGroup: 0
+      restartPolicy: Always

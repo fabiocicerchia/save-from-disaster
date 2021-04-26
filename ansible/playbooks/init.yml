@@ -1,0 +1,75 @@
+---
+- name: "Initial Provisioning"
+  hosts: all
+  become: true
+
+  vars_files:
+    - ../vars/init.yml
+
+  roles:
+    - oefenweb.apt
+    - ahuffman.resolv
+    - geerlingguy.ntp
+    - dev-sec.os-hardening
+    - dev-sec.ssh-hardening
+
+  tasks:
+
+  - name: Add user manager
+    ansible.builtin.user:
+      name: "manager"
+      shell: /bin/bash
+      generate_ssh_key: yes
+      ssh_key_type: rsa
+      ssh_key_bits: 4096
+
+  - name: Allow manager to have passwordless sudo
+    lineinfile:
+      dest: /etc/sudoers
+      state: present
+      insertafter: '^root'
+      line: 'manager ALL=(ALL) NOPASSWD: ALL'
+      validate: 'visudo -cf %s'
+
+  - name: Copy authorized_keys
+    ansible.builtin.copy:
+      src: /root/.ssh/authorized_keys
+      dest: /home/manager/.ssh/authorized_keys
+      owner: manager
+      group: manager
+
+  - name: Allow TCP port 22 (SSH)
+    iptables:
+      chain: INPUT
+      protocol: tcp
+      source: {{ item }}
+      destination_port: 22
+      jump: ACCEPT
+    with_items: "{{ }}"
+
+  # LOGZ.IO
+  # ################
+
+  - name: "Filebeat"
+    shell: |
+      # Ref: https://www.elastic.co/guide/en/beats/filebeat/current/filebeat-installation.html
+      curl -L -O https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-7.12.0-amd64.deb
+      dpkg -i filebeat-7.12.0-amd64.deb
+      rm filebeat-7.12.0-amd64.deb
+    ignore_errors: yes
+
+  - name: "Download the Logz.io public certificate"
+    shell: sudo curl https://raw.githubusercontent.com/logzio/public-certificates/master/TrustExternalCARoot_and_USERTrustRSAAAACA.crt --create-dirs -o /etc/pki/tls/certs/COMODORSADomainValidationSecureServerCA.crt
+
+  - name: Create a directory if it does not exist
+    file:
+      path: /etc/filebeat
+      state: directory
+  - name: "Move the configuration file to the Filebeat folder"
+    copy:
+      src: ../config/filebeat/filebeat.yml
+      dest: /etc/filebeat/filebeat.yml
+  - name: "Apply Env vars"
+    shell: |
+      cat /etc/filebeat/filebeat.yml | envsubst | tee /etc/filebeat/filebeat.yml
+      /etc/init.d/filebeat restart

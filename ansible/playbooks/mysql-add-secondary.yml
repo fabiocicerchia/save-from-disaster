@@ -1,0 +1,185 @@
+---
+- name: "Provision a new MySQL secondary node"
+  hosts: all
+  become: true
+
+  roles:
+    - dev-sec.mysql-hardening
+
+  vars_files:
+    - ../vars/mysql.yml
+
+  tasks:
+
+  - name: shared settings
+    when: inventory_hostname != new_node
+    block:
+
+    - name: Patch replica settings
+      lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^auto-increment-increment'
+        line: auto-increment-increment={{ ansible_play_hosts | length }}
+ 
+    - name: Restart MySQL
+      ansible.builtin.systemd:
+        state: restarted
+        name: mysql
+
+  - name: node settings
+    when: inventory_hostname == new_node
+    block:
+
+    - name: Add fine-tuning settings
+      blockinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        backup: yes
+        validate: mysqld --validate-config
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        insertbefore: "[mysqldump]"
+        block: |
+          # Fine Tuning
+          read_buffer_size=60K
+          sort_buffer_size=1M
+          innodb_buffer_pool_size=64M
+          tmp_table_size=8M
+          max_connections=25
+          table_open_cache_instances=8
+          innodb_read_io_threads=64
+          innodb_write_io_threads=64
+          innodb_fast_shutdown=0
+          innodb_log_buffer_size=256M
+          innodb_log_file_size=512M
+          innodb_flush_method=O_DIRECT
+ 
+    - name: Set max_binlog_size
+      lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^max_binlog_size'
+        line: max_binlog_size = 100M
+ 
+    - name: Change file ownership, group and permissions
+      file:
+        path: /etc/mysql/certs
+        owner: mysql
+        group: mysql
+        mode: '0600'
+ 
+    - name: Fetch CA cert from bootstrap node
+      local_action: |
+        scp manager@{{ bootstrap_node_ip }}:/etc/mysql/certs/ca-cert.pem /tmp/ca-cert.pem
+ 
+    - name: Upload CA cert
+      copy:
+        src: /tmp/ca-cert.pem
+        dest: /etc/mysql/certs/ca-cert.pem
+        owner: mysql
+        group: mysql
+        mode: '0600'
+ 
+    - name: Generate SSL certs on secondary
+      shell: |
+        openssl req -x509 -subj "/C=IT/ST=Rome/L=Rome/O={{ domain }}/CN={{ domain }}" -newkey rsa:2048 -keyout /etc/mysql/certs/private.pem -out /etc/mysql/certs/public.pem -nodes -days 3650
+        openssl rsa -in /etc/mysql/certs/private.pem -out /etc/mysql/certs/private.pem
+        cat /etc/mysql/certs/public.pem >> /etc/mysql/certs/ca-cert.pem
+        chown -R mysql:mysql /etc/mysql/certs
+        chmod -R 600 /etc/mysql/certs/*
+ 
+    - name: Fetch updated CA cert
+      local_action: |
+        scp manager@{{ ansible_default_ipv4.address }}:/etc/mysql/certs/ca-cert.pem /tmp/ca-cert.pem
+ 
+    - name: Upload CA cert to bootstrap
+      local_action: |
+        scp /tmp/ca-cert.pem manager@{{ bootstrap_node_ip }}:/etc/mysql/certs/ca-cert.pem
+ 
+    - name: Add SSL settings
+      blockinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        backup: yes
+        validate: mysqld --validate-config
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        insertbefore: "[mysqldump]"
+        block: |
+          ssl
+          ssl-ca=/etc/mysql/certs/ca-cert.pem
+          ssl-cert=/etc/mysql/certs/public.pem
+          ssl-key=/etc/mysql/certs/private.pem
+ 
+    - name: Add replica settings
+      blockinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        backup: yes
+        validate: mysqld --validate-config
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        insertbefore: "[mysqldump]"
+        block: |
+          server-id={{ instance_count }}
+          log-bin="mysql-bin"
+          binlog-ignore-db=test
+          binlog-ignore-db=information_schema
+          replicate-ignore-db=test
+          replicate-ignore-db=information_schema
+          relay-log="mysql-relay-log"
+          auto-increment-increment = {{ ansible_play_hosts | length }}
+          auto-increment-offset = {{ instance_count }}
+          slave_exec_mode = IDEMPOTENT
+ 
+    - name: Restart MySQL
+      ansible.builtin.systemd:
+        state: restarted
+        name: mysql
+ 
+    - name: Debug SSL
+      shell: mysql -uroot -e "SHOW VARIABLES LIKE '%ssl%'\G"
+ 
+    - name: Lock with Firewall
+      iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: 3306
+        source: "{{ cross_mapping['%s' | format(hostvars[inventory_hostname]['ansible_default_ipv4']['address'] | replace('.', '_'))] }}"
+        jump: ACCEPT
+      become: yes
+ 
+    - name: Create replica user
+      shell: |
+        mysql -uroot -e "SET SQL_LOG_BIN=0;"
+        mysql -uroot -e "CREATE USER '{{ replica_user }}'@'%' IDENTIFIED WITH mysql_native_password BY '{{ replica_password }}' REQUIRE SSL;"
+        mysql -uroot -e "GRANT REPLICATION SLAVE ON *.* TO '{{ replica_user }}'@'%';"
+        mysql -uroot -e "FLUSH PRIVILEGES;"
+        mysql -uroot -e "SET SQL_LOG_BIN=1;"
+ 
+    - name: Lock tables
+      local_action: |
+        ssh manager@{{ bootstrap_node_ip }} 'mysql -uroot -e "FLUSH TABLES WITH READ LOCK;"'
+ 
+    - name: Fetch binlog from bootstrap node
+      register: bootstrap_binlog
+      local_action: |
+        ssh manager@{{ bootstrap_node_ip }} 'mysql -uroot -e "SHOW MASTER STATUS\G" | grep "File:" | cut -d":" -f2'
+ 
+    - name: Fetch position from bootstrap node
+      register: bootstrap_position
+      local_action: |
+        ssh manager@{{ bootstrap_node_ip }} 'mysql -uroot -e "SHOW MASTER STATUS\G" | grep "Position:" | cut -d":" -f2'
+ 
+    - name: Set master host
+      shell: |
+        mysql -uroot -e "CHANGE MASTER TO MASTER_HOST='{{ bootstrap_node_ip }}', MASTER_USER='{{ replica_user }}', MASTER_PASSWORD='{{ replica_password }}', MASTER_SSL=1, MASTER_SSL_CA='/etc/mysql/certs/ca-cert.pem', MASTER_LOG_FILE = '{{ bootstrap_binlog | trim }}', MASTER_LOG_POS = {{ bootstrap_position }};"
+ 
+    - name: Sync DB
+      local_action: |
+        ssh manager@{{ bootstrap_node_ip }} 'mysqldump -u{{ backup_user }} -p{{ backup_password }} --quick --single-transaction --all-databases > /home/manager/dump.sql && scp /home/manager/dump.sql manager@{{ ansible_default_ipv4.address }}:/home/manager/dump.sql && rm /home/manager/dump.sql'
+ 
+    - name: Import DB
+      shell: mysql < /home/manager/dump.sql && rm /home/manager/dump.sql
+ 
+    - name: Unlock tables
+      local_action: |
+        ssh manager@{{ bootstrap_node_ip }} 'mysql -uroot -e "UNLOCK TABLES;"'
+ 
+    - name: Jump in replica
+      shell: |
+        mysql -uroot -e "START SLAVE;"
+        mysql -uroot -e "SHOW SLAVE STATUS\G"

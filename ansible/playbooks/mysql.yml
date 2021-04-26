@@ -1,0 +1,161 @@
+---
+- name: "Provision MySQL (Bootstrap node)"
+  hosts: mysql_bootstrap
+  become: true
+
+  roles:
+    - dev-sec.mysql-hardening
+
+  vars_files:
+    - ../vars/mysql.yml
+
+  tasks:
+
+  - name: Add fine-tuning settings
+    blockinfile:
+      path: /etc/mysql/mysql.conf.d/mysqld.cnf
+      backup: yes
+      validate: mysqld --validate-config
+      marker: "# {mark} ANSIBLE MANAGED BLOCK"
+      insertbefore: "[mysqldump]"
+      block: |
+        # Fine Tuning
+        read_buffer_size=60K
+        sort_buffer_size=1M
+        innodb_buffer_pool_size=64M
+        tmp_table_size=8M
+        max_connections=25
+        table_open_cache_instances=8
+        innodb_read_io_threads=64
+        innodb_write_io_threads=64
+        innodb_fast_shutdown=0
+        innodb_log_buffer_size=256M
+        innodb_log_file_size=512M
+        innodb_flush_method=O_DIRECT
+
+  - name: Set max_binlog_size
+    ansible.builtin.lineinfile:
+      path: /etc/mysql/mysql.conf.d/mysqld.cnf
+      regexp: '^max_binlog_size'
+      line: max_binlog_size = 100M
+
+  - name: Change file ownership, group and permissions
+    ansible.builtin.file:
+      path: /etc/mysql/certs
+      owner: mysql
+      group: mysql
+      mode: '0600'
+
+  - name: Generate SSL certs on bootstrap
+    shell: |
+      openssl req -x509 -subj "/C=IT/ST=Rome/L=Rome/O={{ domain }}/CN={{ domain }}" -newkey rsa:2048 -keyout /etc/mysql/certs/private.pem -out /etc/mysql/certs/public.pem -nodes -days 3650
+      openssl rsa -in /etc/mysql/certs/private.pem -out /etc/mysql/certs/private.pem
+      cp /etc/mysql/certs/public.pem /etc/mysql/certs/ca-cert.pem
+      chown -R mysql:mysql /etc/mysql/certs
+      chmod -R 600 /etc/mysql/certs/*
+
+  - name: Add SSL settings
+    blockinfile:
+      path: /etc/mysql/mysql.conf.d/mysqld.cnf
+      backup: yes
+      validate: mysqld --validate-config
+      marker: "# {mark} ANSIBLE MANAGED BLOCK"
+      insertbefore: "[mysqldump]"
+      block: |
+        ssl
+        ssl-ca=/etc/mysql/certs/ca-cert.pem
+        ssl-cert=/etc/mysql/certs/master-public.pem
+        ssl-key=/etc/mysql/certs/master-private.pem
+
+  - name: Add replica settings
+    blockinfile:
+      path: /etc/mysql/mysql.conf.d/mysqld.cnf
+      backup: yes
+      validate: mysqld --validate-config
+      marker: "# {mark} ANSIBLE MANAGED BLOCK"
+      insertbefore: "[mysqldump]"
+      block: |
+	server-id={{ instance_count }}
+	log-bin="mysql-bin"
+	binlog-ignore-db=test
+	binlog-ignore-db=information_schema
+	replicate-ignore-db=test
+	replicate-ignore-db=information_schema
+	relay-log="mysql-relay-log"
+	auto-increment-increment = {{ ansible_play_hosts | length }}
+	auto-increment-offset = {{ instance_count }}
+        slave_exec_mode = IDEMPOTENT
+
+  - name: Restart MySQL
+    ansible.builtin.systemd:
+      state: restarted
+      name: mysql
+
+  - name: Debug SSL
+    shell: mysql -uroot -e "SHOW VARIABLES LIKE '%ssl%'\G"
+
+  - name: Lock with Firewall
+    iptables:
+      chain: INPUT
+      protocol: tcp
+      destination_port: 3306
+      source: "{{ cross_mapping['%s' | format(hostvars[inventory_hostname]['ansible_default_ipv4']['address'] | replace('.', '_'))] }}"
+      jump: ACCEPT
+    become: yes
+
+  - name: Create users
+    shell: |
+      mysql -uroot -e "CREATE USER IF NOT EXISTS backup@localhost IDENTIFIED WITH mysql_native_password BY '';"
+      mysql -uroot -e "UPDATE mysql.user SET authentication_string = '' WHERE user = 'backup' AND host = 'localhost';"
+      mysql -uroot -e "GRANT SELECT,INSERT,UPDATE ON *.* TO backup@localhost;"
+
+  - name: Create replica user
+    shell: |
+      mysql -uroot -e "SET SQL_LOG_BIN=0;"
+      mysql -uroot -e "CREATE USER '{{ replica_user }}'@'%' IDENTIFIED WITH mysql_native_password BY '{{ replica_password }}' REQUIRE SSL;"
+      mysql -uroot -e "GRANT REPLICATION SLAVE ON *.* TO '{{ replica_user }}'@'%';"
+      mysql -uroot -e "FLUSH PRIVILEGES;"
+      mysql -uroot -e "SET SQL_LOG_BIN=1;"
+
+  - name: Setup AWS config
+    blockinfile:
+      path: /root/.aws/config
+      block: |
+        [default]
+        region = eu-west-1
+
+  - name: Setup AWS credentials
+    blockinfile:
+      path: /root/.aws/credentials
+      block: |
+        [default]
+        aws_access_key_id = {{ aws_access_key_id }}
+        aws_secret_access_key = {{ aws_secret_access_key }}
+
+  - name: Generate encryption key
+    local_action: |
+      openssl genrsa -out ../ssl/key.pem
+      openssl rsa -in ../ssl/key.pem -out ../ssl/key.pub -pubout
+
+  - name: Upload encryption key
+    ansible.builtin.copy:
+      src: ../ssl/key.pub
+      dest: /root/.ssh/backup.pub
+      owner: root
+      group: root
+      mode: '0600'
+
+  - name: Copy backup script
+    ansible.builtin.copy:
+      src: ../scripts/mysql-backup.sh
+      dest: /root/mysql-backup.sh
+      owner: root
+      group: root
+      mode: '0750'
+
+  - name: Add backup script to crontab
+    blockinfile:
+      path: /var/spool/cron/crontabs/root
+      block: |
+        0 0 * * * /usr/bin/timeout 180 /root/mysql-backup.sh
+        2 * * * * /usr/bin/timeout 180 /usr/sbin/logrotate -f /etc/logrotate.d/mysql-backup

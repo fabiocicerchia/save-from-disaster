@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  labels:
+    network/proxy: "true"
+    service: static-example
+  namespace: app-example
+  name: static-example
+spec:
+  selector:
+    matchLabels:
+      service: static-example
+  template: 
+    metadata:
+      labels:
+        service: static-example
+    spec:
+      nodeSelector:
+        kubernetes.io/role: node
+      containers:
+        - image: nginx:1.19.10
+          imagePullPolicy: IfNotPresent
+          livenessProbe:
+            exec:
+              command:
+                - curl
+                - -f
+                - http://localhost:8080
+            failureThreshold: 3
+            periodSeconds: 30
+            timeoutSeconds: 5
+          name: static-example
+          ports:
+            - containerPort: 8080
+          resources: {}
+          volumeMounts:
+            - mountPath: /app
+              name: app
+            - name: nginx-vhost-example
+              mountPath: /etc/nginx/conf.d/example.conf
+              subPath: example.conf
+              readOnly: true
+      volumes:
+        - name: app
+          persistentVolumeClaim:
+            claimName: pvc-static-example
+        - name: nginx-vhost-example
+          configMap:
+            name: nginx-vhost-example
+            items:
+              - key: example.conf
+                path: example.conf
+      securityContext:
+        runAsUser: 0
+        fsGroup: 0
+      restartPolicy: Always

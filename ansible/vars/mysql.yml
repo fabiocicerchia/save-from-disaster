@@ -1,0 +1,11 @@
+domain: "example.com"
+
+replica_user: "repl"
+backup_user: "repl"
+
+bootstrap_node_ip: "xxx.xxx.xxx.xxx"
+secondary_node_ip: "yyy.yyy.yyy.yyy"
+
+cross_mapping:
+  yyy_yyy_yyy_yyy: "xxx.xxx.xxx.xxx"
+  xxx_xxx_xxx_xxx: "yyy.yyy.yyy.yyy"

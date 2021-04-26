@@ -1,0 +1,4 @@
+[hetzner]
+web-1 ansible_host=xxx.xxx.xxx.xxx
+web-2 ansible_host=yyy.yyy.yyy.yyy
+

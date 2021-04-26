@@ -1,0 +1,14 @@
+pip_install_packages:
+  - name: docker
+
+manager_node_ip: "xxx.xxx.xxx.xxx"
+secondary_node_ip: "yyy.yyy.yyy.yyy"
+
+cross_mapping:
+  yyy_yyy_yyy_yyy: "xxx.xxx.xxx.xxx"
+  xxx_xxx_xxx_xxx: "yyy.yyy.yyy.yyy"
+
+stacks:
+  - { name: "example_wordpress", path: "docker-compose-wordpress.yml" }
+  - { name: "example_client", path: "docker-compose-example.yml" }
+  - { name: "logzio_client", path: "docker-compose-logzio.yml" }

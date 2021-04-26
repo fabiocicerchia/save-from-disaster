@@ -1,0 +1,2 @@
+[digitalocean]
+web-0 ansible_host=xxx.xxx.xxx.xxx

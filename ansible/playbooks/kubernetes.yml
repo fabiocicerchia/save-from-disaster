@@ -1,0 +1,32 @@
+---
+- hosts: all
+  become: true
+
+  tasks:
+  - name: Setup Master
+    include: kubernetes-master.yml
+
+  - name: Setup Worker
+    include: kubernetes-worker.yml
+
+  - name: Configure cluster resources
+    shell: |
+      kubectl apply -f ../config/kubernetes/cluster/storageclass.yaml
+      kubectl apply -f ../config/kubernetes/cluster/mysql.yaml
+
+  - name: Configure cert manager
+    shell: |
+      kubectl apply --validate=false -f https://github.com/jetstack/cert-manager/releases/download/v1.3.1/cert-manager.yaml
+      kubectl apply -f ../config/kubernetes/issuer
+
+  - name: Configure nginx ingress
+    shell: |
+      kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/master/deploy/static/provider/kind/deploy.yaml
+      kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=90s
+
+  - name: Configure projects
+    shell: |
+      kubectl apply -f {{ item }}/namespace.yaml
+      kubectl apply -f cluster/memory-defaults.yaml --namespace=app-{{ item }}
+      kubectl apply -f {{ item }}
+    with_items: "{{ projects }}"

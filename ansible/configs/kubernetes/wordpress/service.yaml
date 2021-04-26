@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    service: wordpress
+  namespace: app-wordpress
+  name: wordpress
+spec:
+  selector:
+    service: wordpress
+  ports:
+    - name: "30014"
+      nodePort: 30014
+      port: 80
+      targetPort: 80
+  type: NodePort

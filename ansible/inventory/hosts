@@ -1,0 +1,12 @@
+[mysql:children]
+hetzner
+
+[kubernetes:children]
+kubernetes_master
+kubernetes_worker
+
+[kubernetes_master]
+scaleway
+
+[kubernetes_worker]
+hetzner

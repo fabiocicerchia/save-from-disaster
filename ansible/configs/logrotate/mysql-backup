@@ -1,0 +1,84 @@
+/var/backups/hourly/*.enc {
+  notifempty
+  hourly
+  rotate 24
+  nocompress
+  create 640 root root
+  dateext
+  dateformat -%Y%m%d%H-%s
+  sharedscripts
+
+  postrotate
+    /root/mysql-backup.sh
+  endscript
+
+  lastaction
+    BUCKET="xxx-db-backup"
+    REGION="eu-west-1"
+    FORMAT=`date "+%Y%m%d%H"`
+    aws s3 sync /var/backups/hourly "s3://$BUCKET/hourly/" --region $REGION --exclude "*" --include "*.enc" --include "*.enc-$FORMAT*" --storage-class GLACIER
+  endscript
+}
+
+/var/backups/daily/*.enc {
+  notifempty
+  daily
+  rotate 7
+  nocompress
+  create 640 root root
+  dateext
+  dateformat -%Y%m%d-%s
+
+  postrotate
+    /root/mysql-backup.sh
+  endscript
+
+  lastaction
+    BUCKET="xxx-db-backup"
+    REGION="eu-west-1"
+    FORMAT=`date "+%Y%m%d"`
+    aws s3 sync /var/backups/daily/ "s3://$BUCKET/daily/" --region $REGION --exclude "*" --include "*.enc" --include "*.enc-$FORMAT*" --storage-class GLACIER
+  endscript
+}
+
+/var/backups/weekly/*.enc {
+  notifempty
+  weekly
+  rotate 4
+  nocompress
+  create 640 root root
+  dateext
+  dateformat -%Y%m%d-%s
+
+  postrotate
+    /root/mysql-backup.sh
+  endscript
+
+  lastaction
+    BUCKET="xxx-db-backup"
+    REGION="eu-west-1"
+    FORMAT=`date "+%Y%m%d"`
+    aws s3 sync /var/backups/weekly/ "s3://$BUCKET/weekly/" --region $REGION --exclude "*" --include "*.enc" --include "*.enc-$FORMAT*" --storage-class GLACIER
+  endscript
+}
+
+/var/backups/monthly/*.enc {
+  notifempty
+  monthly
+  rotate 3
+  nocompress
+  create 640 root root
+  dateext
+  dateformat -%Y%m-%s
+
+  postrotate
+    /root/mysql-backup.sh
+  endscript
+
+  lastaction
+    BUCKET="xxx-db-backup"
+    REGION="eu-west-1"
+    FORMAT=`date "+%Y%m"`
+    aws s3 sync /var/backups/monthly/ "s3://$BUCKET/monthly/" --region $REGION --exclude "*" --include "*.enc" --include "*.enc-$FORMAT*" --storage-class GLACIER
+  endscript
+}

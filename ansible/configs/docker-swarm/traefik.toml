@@ -1,0 +1,24 @@
+logLevel = "DEBUG"
+defaultEntryPoints = ["web", "web-secured"]
+
+[providers.file]
+  directory = "/conf/"
+  watch = true
+
+[accessLog]
+
+[entryPoints]
+    [entryPoints.web]
+    address = ":80"
+    [entryPoints.web-secured]
+    address = ":443"
+
+[providers.docker]
+watch = true
+swarmMode = true
+exposedByDefault = false
+network = "proxy"
+
+[api]
+dashboard = true
+insecure = true

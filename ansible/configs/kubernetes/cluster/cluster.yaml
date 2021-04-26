@@ -1,0 +1,28 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+- role: control-plane
+  extraMounts:
+  - hostPath: /path/to/ansible/configs/kubernetes/example/www
+    containerPath: /var/www/example
+  - hostPath: /path/to/ansible/configs/kubernetes/example_blog/www
+    containerPath: /var/www/example_blog/wp-content
+  kubeadmConfigPatches:
+  - |
+    kind: InitConfiguration
+    nodeRegistration:
+      kubeletExtraArgs:
+        node-labels: "ingress-ready=true"
+  extraPortMappings:
+  - containerPort: 80
+    hostPort: 80
+    protocol: TCP
+  - containerPort: 443
+    hostPort: 443
+    protocol: TCP
+- role: worker
+  extraMounts:
+  - hostPath: /path/to/ansible/configs/kubernetes/example/www
+    containerPath: /var/www/example
+  - hostPath: /path/to/ansible/configs/kubernetes/example_blog/www
+    containerPath: /var/www/example_blog/wp-content
